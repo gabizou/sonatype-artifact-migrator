@@ -14,6 +14,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -177,6 +178,9 @@ public class Main {
         LOGGER.info("Artifacts Discovered:\n {}", s);
 
         final OkHttpClient client = new OkHttpClient().newBuilder()
+            .connectTimeout(Duration.ofMinutes(2))
+            .writeTimeout(Duration.ofMinutes(2))
+            .readTimeout(Duration.ofMinutes(2))
             .build();
         final String fullUrl = baseRepoUrl + UPLOAD_ENDPOINT;
         final String creds = Credentials.basic(username, password);
