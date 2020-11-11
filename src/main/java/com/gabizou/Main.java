@@ -1,6 +1,5 @@
 package com.gabizou;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import okhttp3.Credentials;
@@ -17,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class Main {
@@ -30,7 +30,7 @@ public class Main {
 
     public static final String UPLOAD_ENDPOINT = "service/rest/v1/components";
 
-    private static final Logger LOGGER = LogManager.getLogger();
+    private static final Logger LOGGER = LogManager.getLogger("SpongeArtifactUploader");
 
     public static void main(String[] args) throws IOException {
         final String baseRepoUrl = System.getenv().get(BASE_URL_KEY);
@@ -48,15 +48,18 @@ public class Main {
             .map(Path::toFile)
             .map(File::getName)
             .collect(Collectors.toList());
+        LOGGER.info("Discovered {}", artifactIds);
 
         final List<ArtifactUpload> uploads = artifactIds.stream().map(artifactId -> {
             final Path artifactDirectory = new File(workingDirectory, artifactId).toPath();
+            LOGGER.info("Inspecting Artifact: {}", artifactDirectory);
             try {
                 final List<MavenComponent> components = Files.list(artifactDirectory)
                     .filter(Files::isDirectory)
                     .map(versionDir -> {
                         final String version = versionDir.getFileName().toFile().getName();
                         final MavenComponent mavenArtifact;
+                        LOGGER.info("Inspecting Artifact Version: {}", version);
                         if (version.endsWith("-SNAPSHOT")) {
                             final List<Artifact> poms;
                             try {
@@ -71,6 +74,9 @@ public class Main {
                             } catch (IOException e) {
                                 e.printStackTrace();
                                 throw new IllegalStateException("Illegal Director");
+                            }
+                            if (poms.isEmpty()) {
+                                return Optional.<MavenComponent>empty();
                             }
                             final List<VersionedArtifact> versionedArtifacts = poms.stream().map(pomFile -> {
                                 final String baseFile = pomFile.fileName.replace(".pom", "");
@@ -103,7 +109,7 @@ public class Main {
                             LOGGER.debug("Discovered versioned directory: {}", versionDir);
 
                             try {
-                                poms = Files.walk(versionDir)
+                                final List<Artifact> pomFiles = Files.walk(versionDir)
                                     .filter(path -> {
                                         final String fileName = path.getFileName().toFile().getName();
                                         return fileName.endsWith(".pom");
@@ -117,7 +123,11 @@ public class Main {
                                             LOGGER.debug("Discovered Pom: {}", pom);
                                             return pom;
                                         }
-                                    ).collect(Collectors.toList()).get(0);
+                                    ).collect(Collectors.toList());
+                                if (pomFiles.isEmpty()) {
+                                    return Optional.<MavenComponent>empty();
+                                }
+                                poms = pomFiles.get(0);
                             } catch (IOException e) {
                                 e.printStackTrace();
                                 throw new IllegalStateException("Unsafe operation");
@@ -148,8 +158,11 @@ public class Main {
                             }
                             mavenArtifact = new ReleaseComponent(artifactId, version, poms, artifacts);
                         }
-                        return mavenArtifact;
-                    }).collect(Collectors.toList());
+                        return Optional.<MavenComponent>of(mavenArtifact);
+                    })
+                    .filter(Optional::isPresent)
+                    .map(Optional::get)
+                    .collect(Collectors.toList());
 
                 return new ArtifactUpload(artifactId, components);
             } catch (IOException e) {
