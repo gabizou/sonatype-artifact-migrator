@@ -6,7 +6,10 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import okhttp3.Credentials;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import okhttp3.Response;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
@@ -26,6 +29,8 @@ public class Main {
     public static final String TARGET_DIR = "TARGET_DIR";
 
     public static final String UPLOAD_ENDPOINT = "service/rest/v1/components";
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     public static void main(String[] args) throws IOException {
         final String baseRepoUrl = System.getenv().get(BASE_URL_KEY);
@@ -80,8 +85,10 @@ public class Main {
                                             final String qualifier = fileQualifiedName.replace(baseFile, "")
                                                 .replace("-", "")
                                                 .replace(".jar", "");
-                                            return new Artifact(
+                                            final Artifact artifact = new Artifact(
                                                 fileQualifiedName, jarFile.toAbsolutePath().toString(), qualifier);
+                                            LOGGER.debug("Discovered {}:{} Artifact: {}", artifactId, version, artifact);
+                                            return artifact;
                                         })
                                         .collect(Collectors.toList());
                                 } catch (IOException e) {
@@ -93,7 +100,7 @@ public class Main {
                             mavenArtifact = new SnapshotComponent(artifactId, version, versionedArtifacts);
                         } else {
                             final Artifact poms;
-                            System.out.println(versionDir);
+                            LOGGER.debug("Discovered versioned directory: {}", versionDir);
 
                             try {
                                 poms = Files.walk(versionDir)
@@ -102,10 +109,14 @@ public class Main {
                                         return fileName.endsWith(".pom");
                                     }).map(
                                         pomPath ->
-                                            new Artifact(
+                                        {
+                                            final Artifact pom = new Artifact(
                                                 pomPath.getFileName().toFile().getName(),
                                                 pomPath.toAbsolutePath().toString(), "pom"
-                                            )
+                                            );
+                                            LOGGER.debug("Discovered Pom: {}", pom);
+                                            return pom;
+                                        }
                                     ).collect(Collectors.toList()).get(0);
                             } catch (IOException e) {
                                 e.printStackTrace();
@@ -123,8 +134,12 @@ public class Main {
                                         final String qualifier = fileQualifiedName.replace(baseFile, "")
                                             .replace("-", "")
                                             .replace(".jar", "");
-                                        return new Artifact(
-                                            fileQualifiedName, jarFile.toAbsolutePath().toString(), qualifier.replace("-", ""));
+                                        final Artifact artifact = new Artifact(
+                                            fileQualifiedName, jarFile.toAbsolutePath().toString(),
+                                            qualifier.replace("-", "")
+                                        );
+                                        LOGGER.debug("Discovered {}:{} Artifact: {}", artifactId, version, artifact);
+                                        return artifact;
                                     })
                                     .collect(Collectors.toList());
                             } catch (IOException e) {
@@ -146,7 +161,7 @@ public class Main {
         final ObjectMapper mapper = new ObjectMapper();
         mapper.enable(SerializationFeature.INDENT_OUTPUT);
         final String s = mapper.writeValueAsString(uploads);
-        System.out.println(s);
+        LOGGER.info("Artifacts Discovered:\n {}", s);
 
         final OkHttpClient client = new OkHttpClient().newBuilder()
             .build();
@@ -156,18 +171,23 @@ public class Main {
 
         uploads.parallelStream()
             .forEach(upload -> upload.versions.parallelStream()
-                .map(mavenComponent -> mavenComponent.buildRequests(parse.newBuilder(), creds, snapshotRepo, releaseRepo))
-                .forEach(componentRequests -> componentRequests.forEach(request -> {
+                .forEach(mavenComponent -> {
+                    final List<Request> requests = mavenComponent.buildRequests(
+                        parse.newBuilder(), creds, snapshotRepo, releaseRepo);
                     try {
-                        System.out.println(mapper.writeValueAsString(request));
                         if (!dryRun) {
-                            final Response response = client.newCall(request).execute();
-                            System.out.println(mapper.writeValueAsString(response));
+                            for (Request request : requests) {
+                                final Response response = client.newCall(request).execute();
+                                if (response.isSuccessful()) {
+                                    LOGGER.info("Successfully uploaded artifact {}", mavenComponent);
+                                }
+                                System.out.println(mapper.writeValueAsString(response));
+                            }
                         }
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                }))
+                })
             );
 
     }

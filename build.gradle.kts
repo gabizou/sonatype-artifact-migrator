@@ -28,6 +28,7 @@ dependencies {
     implementation( group= "com.fasterxml.jackson.core", name= "jackson-core", version= "2.11.3")
     implementation( group= "com.fasterxml.jackson.core", name= "jackson-databind", version= "2.11.3")
     implementation("com.squareup.okhttp3:okhttp:4.9.0")
+    implementation(group="org.apache.logging.log4j", name="log4j-core", version = "2.14.0")
 }
 
 application {
